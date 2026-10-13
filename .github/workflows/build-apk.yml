@@ -1,7 +1,6 @@
 name:ShamsiCalendar
 
-on:
-  workflow_dispatch:
+ on: workflow_dispatch:
   push:
     paths:
       - 'ShamsiCalendar-android-widget-source.zip'
