@@ -1,4 +1,4 @@
-name: Build ShamsiCalendar APK
+name:ShamsiCalendar
 
 on:
   workflow_dispatch:
