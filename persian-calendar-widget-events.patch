@@ -1,0 +1,170 @@
+diff --git a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/Constants.kt b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/Constants.kt
+index c93ac12..8db4ede 100644
+--- a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/Constants.kt
++++ b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/Constants.kt
+@@ -33,6 +33,7 @@ const val PREF_CALENDARS_IDS_AS_HOLIDAY = "calendarsIdsAsHoliday"
+ const val PREF_WIDGET_CLOCK = "WidgetClock"
+ const val PREF_CENTER_ALIGN_WIDGETS = "CenterAlignWidgets"
+ const val PREF_WHAT_TO_SHOW_WIDGETS = "what_to_show"
++const val PREF_SHOW_OFFICIAL_EVENTS_ON_MONTH_WIDGET = "showOfficialEventsOnMonthWidget"
+ const val PREF_WIDGETS_PREFER_SYSTEM_COLORS = "PrefersSystemColorInWidgets"
+ const val PREF_NUMERICAL_DATE_PREFERRED = "numericalDatePreferred"
+ const val PREF_ASTRONOMICAL_FEATURES = "astronomicalFeatures"
+diff --git a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/global/Global.kt b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/global/Global.kt
+index cfcc418..8a7ce15 100644
+--- a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/global/Global.kt
++++ b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/global/Global.kt
+@@ -92,6 +92,7 @@ import com.byagowi.persiancalendar.PREF_SECONDARY_CALENDAR_IN_TABLE
+ import com.byagowi.persiancalendar.PREF_SELECTED_LOCATION
+ import com.byagowi.persiancalendar.PREF_SHOW_DEVICE_CALENDAR_EVENTS
+ import com.byagowi.persiancalendar.PREF_SHOW_MOON_IN_SCORPIO
++import com.byagowi.persiancalendar.PREF_SHOW_OFFICIAL_EVENTS_ON_MONTH_WIDGET
+ import com.byagowi.persiancalendar.PREF_SHOW_QIBLA_IN_COMPASS
+ import com.byagowi.persiancalendar.PREF_SHOW_WEEK_OF_YEAR_NUMBER
+ import com.byagowi.persiancalendar.PREF_SWIPE_DOWN_ACTION
+@@ -353,6 +354,9 @@ val eventCalendarsIdsAsHoliday by eventCalendarsIdsAsHoliday_
+ private val whatToShowOnWidgets_ = mutableStateOf(emptySet<String>())
+ val whatToShowOnWidgets by whatToShowOnWidgets_
+ 
++private val showOfficialEventsOnMonthWidget_ = mutableStateOf(true)
++val showOfficialEventsOnMonthWidget by showOfficialEventsOnMonthWidget_
++
+ private val isAstronomicalExtraFeaturesEnabled_ = mutableStateOf(DEFAULT_ASTRONOMICAL_FEATURES)
+ val isAstronomicalExtraFeaturesEnabled by isAstronomicalExtraFeaturesEnabled_
+ 
+@@ -663,6 +667,8 @@ fun updateStoredPreference(context: Context) {
+ 
+     isShowDeviceCalendarEvents_.value =
+         preferences.getBoolean(PREF_SHOW_DEVICE_CALENDAR_EVENTS, false)
++    showOfficialEventsOnMonthWidget_.value =
++        preferences.getBoolean(PREF_SHOW_OFFICIAL_EVENTS_ON_MONTH_WIDGET, true)
+     eventCalendarsIdsToExclude_.value = if (isShowDeviceCalendarEvents_.value) longSetOf(
+         *(preferences.getString(PREF_CALENDARS_IDS_TO_EXCLUDE, null).orEmpty()).splitFilterNotEmpty(
+             ",",
+diff --git a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/calendar/calendarpager/RenderMonthWidget.kt b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/calendar/calendarpager/RenderMonthWidget.kt
+index c4743bf..29d25c2 100644
+--- a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/calendar/calendarpager/RenderMonthWidget.kt
++++ b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/calendar/calendarpager/RenderMonthWidget.kt
+@@ -31,6 +31,7 @@ fun renderMonthWidget(
+     isShowWeekOfYearEnabled: Boolean,
+     selectedDay: Jdn?,
+     calendar: Calendar,
++    showOfficialEvents: Boolean = true,
+     setWeekNumberText: ((i: Int, text: String) -> Unit)? = null,
+     setText: ((i: Int, text: String, isHoliday: Boolean) -> Unit)? = null,
+ ): String {
+@@ -66,7 +67,12 @@ fun renderMonthWidget(
+                 val dayOffset = (column + row * 7) - (startingWeekDay - weekStart)
+                 if (dayOffset !in monthRange) return@cell
+                 val day = monthStartJdn + dayOffset
+-                val events = eventsRepository.getEvents(day, deviceEvents)
++                val allEvents = eventsRepository.getEvents(day, deviceEvents)
++                // Official built-in calendar events are configurable for the launcher month widget only.
++                // Device-calendar events (including personal and Google Calendar events) remain visible.
++                val events = if (showOfficialEvents) allEvents else allEvents.filter {
++                    it is CalendarEvent.DeviceCalendarEvent
++                }
+                 val isToday = day == today
+ 
+                 val text = mainCalendarNumeral.format(dayOffset + 1)
+diff --git a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/settings/widgetnotification/WidgetSettings.kt b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/settings/widgetnotification/WidgetSettings.kt
+index 55cf3d9..2db5a1b 100644
+--- a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/settings/widgetnotification/WidgetSettings.kt
++++ b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/ui/settings/widgetnotification/WidgetSettings.kt
+@@ -22,6 +22,7 @@ import com.byagowi.persiancalendar.PREF_IRAN_TIME
+ import com.byagowi.persiancalendar.PREF_NUMERICAL_DATE_PREFERRED
+ import com.byagowi.persiancalendar.PREF_SELECTED_WIDGET_BACKGROUND_COLOR
+ import com.byagowi.persiancalendar.PREF_SELECTED_WIDGET_TEXT_COLOR
++import com.byagowi.persiancalendar.PREF_SHOW_OFFICIAL_EVENTS_ON_MONTH_WIDGET
+ import com.byagowi.persiancalendar.PREF_WHAT_TO_SHOW_WIDGETS
+ import com.byagowi.persiancalendar.PREF_WIDGETS_PREFER_SYSTEM_COLORS
+ import com.byagowi.persiancalendar.PREF_WIDGET_CLOCK
+@@ -36,6 +37,7 @@ import com.byagowi.persiancalendar.global.language
+ import com.byagowi.persiancalendar.global.mainCalendar
+ import com.byagowi.persiancalendar.global.numericalDatePreferred
+ import com.byagowi.persiancalendar.global.prefersWidgetsDynamicColors
++import com.byagowi.persiancalendar.global.showOfficialEventsOnMonthWidget
+ import com.byagowi.persiancalendar.global.userSetTheme
+ import com.byagowi.persiancalendar.global.whatToShowOnWidgets
+ import com.byagowi.persiancalendar.global.widgetTransparency
+@@ -58,6 +60,8 @@ import com.byagowi.persiancalendar.shared.generated.resources.which_one_to_show
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_background_color
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_background_transparency
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_customization_non_holiday_events
++import com.byagowi.persiancalendar.shared.generated.resources.show_official_events_on_month_widget
++import com.byagowi.persiancalendar.shared.generated.resources.show_official_events_on_month_widget_summary
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_customization_other_calendars
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_customization_times
+ import com.byagowi.persiancalendar.shared.generated.resources.widget_customization_times_location
+@@ -94,6 +98,12 @@ fun WidgetSettings(modifier: Modifier = Modifier) {
+             title = stringResource(Res.string.clock_in_24),
+             summary = stringResource(Res.string.showing_clock_in_24),
+         )
++        SettingsSwitch(
++            key = PREF_SHOW_OFFICIAL_EVENTS_ON_MONTH_WIDGET,
++            value = showOfficialEventsOnMonthWidget,
++            title = stringResource(Res.string.show_official_events_on_month_widget),
++            summary = stringResource(Res.string.show_official_events_on_month_widget_summary),
++        )
+         SettingsSwitch(
+             key = PREF_CENTER_ALIGN_WIDGETS,
+             value = isCenterAlignWidgets,
+diff --git a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/utils/UpdateUtils.kt b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/utils/UpdateUtils.kt
+index 03b5871..b6d68d4 100644
+--- a/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/utils/UpdateUtils.kt
++++ b/PersianCalendar/src/main/kotlin/com/byagowi/persiancalendar/utils/UpdateUtils.kt
+@@ -114,6 +114,7 @@ import com.byagowi.persiancalendar.global.numeral
+ import com.byagowi.persiancalendar.global.prefersWidgetsDynamicColors
+ import com.byagowi.persiancalendar.global.secondaryCalendar
+ import com.byagowi.persiancalendar.global.shiftWorkSettings
++import com.byagowi.persiancalendar.global.showOfficialEventsOnMonthWidget
+ import com.byagowi.persiancalendar.global.spacedComma
+ import com.byagowi.persiancalendar.global.weekEnds
+ import com.byagowi.persiancalendar.global.weekStart
+@@ -642,7 +643,11 @@ private fun createMonthRemoteViews(context: Context, size: DpSize?, widgetId: In
+         if (i >= (daysRowsCount + 1) * 7) return@forEachIndexed
+         remoteViews.removeAllViews(id)
+         val day = monthStartJdn + i - 7 - startingWeekDay
+-        val events = eventsRepository.getEvents(day, deviceEvents)
++        val allEvents = eventsRepository.getEvents(day, deviceEvents)
++        // Keep personal/device-calendar events while optionally hiding built-in events on month widgets.
++        val events = if (showOfficialEventsOnMonthWidget) allEvents else allEvents.filter {
++            it is CalendarEvent.DeviceCalendarEvent
++        }
+         val date = day on mainCalendar
+         run {
+             val viewId = when {
+@@ -919,6 +924,7 @@ fun createMonthViewRemoteViews(context: Context, size: DpSize?, today: Jdn): Rem
+         isRtl = isRtl,
+         isShowWeekOfYearEnabled = isShowWeekOfYearEnabled,
+         selectedDay = null,
++        showOfficialEvents = showOfficialEventsOnMonthWidget,
+         setWeekNumberText = if (size != null && prefersWidgetsDynamicColors) { i, text ->
+             val id = monthWidgetWeeks[i]
+             remoteViews.setTextViewText(id, text)
+diff --git a/shared/src/androidMain/res/values-fa/strings.xml b/shared/src/androidMain/res/values-fa/strings.xml
+index 42baf72..2d45bc9 100644
+--- a/shared/src/androidMain/res/values-fa/strings.xml
++++ b/shared/src/androidMain/res/values-fa/strings.xml
+@@ -270,6 +270,8 @@
+     <string name="method_tehran">انجمن ژئوفیزیک، دانشگاه تهران</string>
+     <string name="other_holidays">سایر</string>
+     <string name="view_source">مشاهدهٔ منبع</string>
++    <string name="show_official_events_on_month_widget">نمایش مناسبت‌های رسمی در ویجت ماهانه</string>
++    <string name="show_official_events_on_month_widget_summary">با خاموش‌کردن این گزینه، مناسبت‌های داخلی تقویم فقط از ویجت ماهانه پنهان می‌شوند؛ رویدادهای شخصی و گوگل باقی می‌مانند.</string>
+     <string name="widget_customization_other_calendars">دیگر تقویم‌ها در ویجت ماه، ۴×۱ و ۲×۲</string>
+     <string name="widget_customization_non_holiday_events">مناسبت‌های غیر تعطیل در ویجت ۲×۲ و اعلان</string>
+     <string name="widget_customization_times">اوقات در ویجت و اعلان (در صورت تنظیم)</string>
+diff --git a/shared/src/androidMain/res/values/strings.xml b/shared/src/androidMain/res/values/strings.xml
+index a97eada..02ed602 100644
+--- a/shared/src/androidMain/res/values/strings.xml
++++ b/shared/src/androidMain/res/values/strings.xml
+@@ -254,6 +254,8 @@
+     <string name="other_holidays">Others</string>
+     <string name="view_source">view source</string>
+     <!--Widget customizations-->
++    <string name="show_official_events_on_month_widget">Show official events on monthly widget</string>
++    <string name="show_official_events_on_month_widget_summary">Turn off to hide built-in calendar events only on the monthly widget. Personal and Google Calendar events remain visible.</string>
+     <string name="widget_customization_other_calendars">Other calendars on 1x4 and 2x2 widgets</string>
+     <string name="widget_customization_non_holiday_events">Non-holidays on 2x2 widget and notification</string>
+     <string name="widget_customization_times">Pray times on widgets and notification (if is set)</string>
